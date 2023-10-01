@@ -7,7 +7,11 @@
 use bsp::entry;
 use defmt::*;
 use defmt_rtt as _;
+<<<<<<< HEAD
 use embedded_hal::digital::OutputPin;
+=======
+use embedded_hal::digital::v2::{InputPin, OutputPin};
+>>>>>>> 455c8fb (Simple but working exp2)
 use panic_probe as _;
 
 // Provide an alias for our BSP so we can switch targets quickly.
@@ -63,14 +67,15 @@ fn main() -> ! {
     // LED to one of the GPIO pins, and reference that pin here. Don't forget adding an appropriate resistor
     // in series with the LED.
     let mut led_pin = pins.led.into_push_pull_output();
+    let button_pin = pins.gpio2.into_pull_down_input();
 
     loop {
         info!("on!");
-        led_pin.set_high().unwrap();
-        delay.delay_ms(500);
-        info!("off!");
-        led_pin.set_low().unwrap();
-        delay.delay_ms(500);
+        if button_pin.is_high().unwrap() {
+            led_pin.set_low().unwrap();
+        } else {
+            led_pin.set_high().unwrap();
+        }
     }
 }
 
