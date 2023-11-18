@@ -4,7 +4,8 @@
 #![no_std]
 #![no_main]
 
-use bsp::entry;
+use core::cell::RefCell;
+use critical_section::Mutex;
 use defmt::*;
 use defmt_rtt as _;
 <<<<<<< HEAD
@@ -13,30 +14,34 @@ use embedded_hal::digital::OutputPin;
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 >>>>>>> 455c8fb (Simple but working exp2)
 use panic_probe as _;
-
-// Provide an alias for our BSP so we can switch targets quickly.
-// Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
-use rp_pico as bsp;
-// use sparkfun_pro_micro_rp2040 as bsp;
-
-use bsp::hal::{
-    clocks::{init_clocks_and_plls, Clock},
-    pac,
-    sio::Sio,
-    watchdog::Watchdog,
+use rp_pico;
+use rp_pico::entry;
+use rp_pico::hal::{
+    clocks::init_clocks_and_plls, pac, pac::interrupt, sio::Sio, watchdog::Watchdog,
 };
+
+static GLOBAL_BUTTON: Mutex<
+    RefCell<
+        Option<
+            rp_pico::hal::gpio::Pin<
+                rp_pico::hal::gpio::bank0::Gpio2,
+                rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioInput>,
+                rp_pico::hal::gpio::PullDown,
+            >,
+        >,
+    >,
+> = Mutex::new(RefCell::new(None));
 
 #[entry]
 fn main() -> ! {
     info!("Program start");
     let mut pac = pac::Peripherals::take().unwrap();
-    let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(pac.WATCHDOG);
     let sio = Sio::new(pac.SIO);
 
     // External high-speed crystal on the pico board is 12Mhz
     let external_xtal_freq_hz = 12_000_000u32;
-    let clocks = init_clocks_and_plls(
+    let _ = init_clocks_and_plls(
         external_xtal_freq_hz,
         pac.XOSC,
         pac.CLOCKS,
@@ -48,9 +53,7 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-
-    let pins = bsp::Pins::new(
+    let pins = rp_pico::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
@@ -69,13 +72,37 @@ fn main() -> ! {
     let mut led_pin = pins.led.into_push_pull_output();
     let button_pin = pins.gpio2.into_pull_down_input();
 
-    loop {
-        info!("on!");
-        if button_pin.is_high().unwrap() {
-            led_pin.set_low().unwrap();
-        } else {
-            led_pin.set_high().unwrap();
-        }
+    unsafe {
+        pac::NVIC::unmask(rp_pico::hal::pac::Interrupt::IO_IRQ_BANK0);
+    }
+    button_pin.set_interrupt_enabled(rp_pico::hal::gpio::Interrupt::EdgeLow, true);
+    // button_pin.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeLow);
+
+    critical_section::with(|cs| {
+        GLOBAL_BUTTON.borrow(cs).replace(Some(button_pin));
+    });
+
+    defmt::info!("Start");
+    loop {}
+}
+
+#[pac::interrupt]
+fn IO_IRQ_BANK0() {
+    static mut BUTTON: Option<
+        rp_pico::hal::gpio::Pin<
+            rp_pico::hal::gpio::bank0::Gpio2,
+            rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioInput>,
+            rp_pico::hal::gpio::PullDown,
+        >,
+    > = None;
+    defmt::info!("Interrupt triggered");
+    if BUTTON.is_none() {
+        critical_section::with(|cs| {
+            *BUTTON = GLOBAL_BUTTON.borrow(cs).take();
+        });
+    };
+    if let Some(button) = BUTTON {
+        button.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeLow);
     }
 }
 
