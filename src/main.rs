@@ -4,15 +4,13 @@
 #![no_std]
 #![no_main]
 
+use core::cell::Cell;
 use core::cell::RefCell;
 use critical_section::Mutex;
 use defmt::*;
 use defmt_rtt as _;
-<<<<<<< HEAD
 use embedded_hal::digital::OutputPin;
-=======
-use embedded_hal::digital::v2::{InputPin, OutputPin};
->>>>>>> 455c8fb (Simple but working exp2)
+
 use panic_probe as _;
 use rp_pico;
 use rp_pico::entry;
@@ -31,6 +29,8 @@ static GLOBAL_BUTTON: Mutex<
         >,
     >,
 > = Mutex::new(RefCell::new(None));
+
+static LED_ON: Mutex<Cell<bool>> = Mutex::new(Cell::new(true));
 
 #[entry]
 fn main() -> ! {
@@ -76,14 +76,23 @@ fn main() -> ! {
         pac::NVIC::unmask(rp_pico::hal::pac::Interrupt::IO_IRQ_BANK0);
     }
     button_pin.set_interrupt_enabled(rp_pico::hal::gpio::Interrupt::EdgeLow, true);
-    // button_pin.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeLow);
+    button_pin.set_interrupt_enabled(rp_pico::hal::gpio::Interrupt::EdgeHigh, true);
 
     critical_section::with(|cs| {
         GLOBAL_BUTTON.borrow(cs).replace(Some(button_pin));
     });
 
     defmt::info!("Start");
-    loop {}
+    loop {
+        critical_section::with(|cs| match LED_ON.borrow(cs).get() {
+            false => {
+                led_pin.set_low().unwrap();
+            }
+            true => {
+                led_pin.set_high().unwrap();
+            }
+        });
+    }
 }
 
 #[pac::interrupt]
@@ -101,9 +110,24 @@ fn IO_IRQ_BANK0() {
             *BUTTON = GLOBAL_BUTTON.borrow(cs).take();
         });
     };
-    if let Some(button) = BUTTON {
-        button.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeLow);
-    }
+
+    critical_section::with(|cs| {
+        if let Some(button) = BUTTON {
+            let led_on = LED_ON.borrow(cs);
+            let edge_low = button.interrupt_status(rp_pico::hal::gpio::Interrupt::EdgeLow);
+            if edge_low {
+                defmt::info!("Edge Low");
+                button.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeLow);
+                led_on.set(false);
+            }
+            let edge_high = button.interrupt_status(rp_pico::hal::gpio::Interrupt::EdgeHigh);
+            if edge_high {
+                defmt::info!("Edge High");
+                button.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeHigh);
+                led_on.set(true);
+            }
+        }
+    });
 }
 
 // End of file
