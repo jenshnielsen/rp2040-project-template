@@ -84,6 +84,8 @@ fn main() -> ! {
 
     defmt::info!("Start");
     loop {
+        cortex_m::asm::wfe();
+        defmt::info!("Waking up");
         critical_section::with(|cs| match LED_ON.borrow(cs).get() {
             false => {
                 led_pin.set_low().unwrap();
@@ -128,6 +130,7 @@ fn IO_IRQ_BANK0() {
             }
         }
     });
+    cortex_m::asm::sev();
 }
 
 // End of file
