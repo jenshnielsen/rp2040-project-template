@@ -5,38 +5,21 @@
 #![no_std]
 #![no_main]
 
-use core::cell::Cell;
-use core::cell::RefCell;
-use critical_section::Mutex;
 use defmt::*;
 use defmt_rtt as _;
-use embedded_hal::digital::OutputPin;
 use embedded_hal::pwm::SetDutyCycle;
 use panic_probe as _;
 use rp_pico;
 use rp_pico::entry;
 use rp_pico::hal;
 use rp_pico::hal::prelude::*;
-use rp_pico::hal::{
-    clocks::init_clocks_and_plls, pac, pac::interrupt, sio::Sio, watchdog::Watchdog,
-};
-static GLOBAL_BUTTON: Mutex<
-    RefCell<
-        Option<
-            rp_pico::hal::gpio::Pin<
-                rp_pico::hal::gpio::bank0::Gpio2,
-                rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioInput>,
-                rp_pico::hal::gpio::PullDown,
-            >,
-        >,
-    >,
-> = Mutex::new(RefCell::new(None));
-
-static LED_ON: Mutex<Cell<bool>> = Mutex::new(Cell::new(true));
+use rp_pico::hal::{clocks::init_clocks_and_plls, pac, sio::Sio, watchdog::Watchdog};
 
 #[entry]
 fn main() -> ! {
     info!("Program start");
+    let low = 0;
+    let high = 25000;
     let mut pac = pac::Peripherals::take().unwrap();
     let core = pac::CorePeripherals::take().unwrap();
     let mut watchdog = Watchdog::new(pac.WATCHDOG);
@@ -67,83 +50,31 @@ fn main() -> ! {
     // Init PWMs
     let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
-    // Configure PWM7
-    let pwm = &mut pwm_slices.pwm7;
-    // need to find a clean way to set the freq from the divider and the wrap around value
-    pwm.set_div_int(40);
-    pwm.set_top(value);
+    // Configure PWM4
+    let pwm = &mut pwm_slices.pwm4;
     pwm.set_ph_correct();
     pwm.enable();
 
-    // Output channel B on PWM7 to the Buzzer pin
-    let buzzer = &mut pwm.channel_b;
-    buzzer.output_to(pins.gpio15);
-    buzzer.set_duty_cycle_percent(50).unwrap();
-    buzzer.set_enabled(true);
+    // Output channel B on PWM7 to the on board LED
+    let led = &mut pwm.channel_b;
+    led.output_to(pins.led);
+    led.set_duty_cycle_percent(50).unwrap();
+    led.set_enabled(true);
     // buzzer.
-
-    let mut led_pin = pins.led.into_push_pull_output();
-    let button_pin = pins.gpio2.into_pull_down_input();
-
-    unsafe {
-        pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
-    }
-    button_pin.set_interrupt_enabled(rp_pico::hal::gpio::Interrupt::EdgeLow, true);
-    button_pin.set_interrupt_enabled(rp_pico::hal::gpio::Interrupt::EdgeHigh, true);
-
-    critical_section::with(|cs| {
-        GLOBAL_BUTTON.borrow(cs).replace(Some(button_pin));
-    });
 
     defmt::info!("Start");
     loop {
-        cortex_m::asm::wfe();
-        defmt::info!("Waking up");
-        critical_section::with(|cs| match LED_ON.borrow(cs).get() {
-            false => {
-                led_pin.set_low().unwrap();
-            }
-            true => {
-                led_pin.set_high().unwrap();
-            }
-        });
+        // Ramp brightness up
+        for i in (low..=high).skip(25) {
+            delay.delay_us(32);
+            led.set_duty_cycle(i).unwrap();
+        }
+        delay.delay_ms(2000);
+        // Ramp brightness down
+        for i in (low..=high).rev().skip(25) {
+            delay.delay_us(32);
+            led.set_duty_cycle(i).unwrap();
+        }
+        delay.delay_ms(2000);
     }
 }
-
-#[pac::interrupt]
-fn IO_IRQ_BANK0() {
-    static mut BUTTON: Option<
-        rp_pico::hal::gpio::Pin<
-            rp_pico::hal::gpio::bank0::Gpio2,
-            rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioInput>,
-            rp_pico::hal::gpio::PullDown,
-        >,
-    > = None;
-    defmt::info!("Interrupt triggered");
-    if BUTTON.is_none() {
-        critical_section::with(|cs| {
-            *BUTTON = GLOBAL_BUTTON.borrow(cs).take();
-        });
-    };
-
-    critical_section::with(|cs| {
-        if let Some(button) = BUTTON {
-            let led_on = LED_ON.borrow(cs);
-            let edge_low = button.interrupt_status(rp_pico::hal::gpio::Interrupt::EdgeLow);
-            if edge_low {
-                defmt::info!("Edge Low");
-                button.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeLow);
-                led_on.set(false);
-            }
-            let edge_high = button.interrupt_status(rp_pico::hal::gpio::Interrupt::EdgeHigh);
-            if edge_high {
-                defmt::info!("Edge High");
-                button.clear_interrupt(rp_pico::hal::gpio::Interrupt::EdgeHigh);
-                led_on.set(true);
-            }
-        }
-    });
-    cortex_m::asm::sev();
-}
-
-// End of file
