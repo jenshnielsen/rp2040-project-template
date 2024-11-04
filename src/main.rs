@@ -24,7 +24,7 @@ static GLOBAL_BUTTON: Mutex<
     RefCell<
         Option<
             rp_pico::hal::gpio::Pin<
-                rp_pico::hal::gpio::bank0::Gpio2,
+                rp_pico::hal::gpio::bank0::Gpio0,
                 rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioInput>,
                 rp_pico::hal::gpio::PullDown,
             >,
@@ -63,17 +63,18 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    // let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     // Init PWMs
     let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
     // Configure PWM7
     let pwm = &mut pwm_slices.pwm7;
-    // need to find a clean way to set the freq from the divider and the wrap around value
+    // need to find a clean way to set the freq from the divider and top value
+    // see description on page 530 of rp2040 sheet for equation
     pwm.set_div_int(40);
-    pwm.set_top(value);
-    pwm.set_ph_correct();
-    pwm.enable();
+    pwm.set_top(0xffff);
+    pwm.set_div_int(4);
+    pwm.disable(); // toggle to enable
 
     // Output channel B on PWM7 to the Buzzer pin
     let buzzer = &mut pwm.channel_b;
@@ -83,7 +84,7 @@ fn main() -> ! {
     // buzzer.
 
     let mut led_pin = pins.led.into_push_pull_output();
-    let button_pin = pins.gpio2.into_pull_down_input();
+    let button_pin = pins.gpio0.into_pull_down_input();
 
     unsafe {
         pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
@@ -114,7 +115,7 @@ fn main() -> ! {
 fn IO_IRQ_BANK0() {
     static mut BUTTON: Option<
         rp_pico::hal::gpio::Pin<
-            rp_pico::hal::gpio::bank0::Gpio2,
+            rp_pico::hal::gpio::bank0::Gpio0,
             rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioInput>,
             rp_pico::hal::gpio::PullDown,
         >,
