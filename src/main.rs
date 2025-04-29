@@ -44,7 +44,8 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    // is this required?
+    let mut _delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -63,7 +64,7 @@ fn main() -> ! {
     // LED to one of the GPIO pins, and reference that pin here. Don't forget adding an appropriate resistor
     // in series with the LED.
     let mut led_pin = pins.led.into_push_pull_output();
-    let button_pin = pins.gpio2.into_pull_down_input();
+    let mut button_pin = pins.gpio2.into_pull_down_input();
 
     loop {
         info!("on!");
